@@ -71,6 +71,8 @@ aerospacefunnel ingest metar           # weather
 aerospacefunnel ingest disruption      # FAA ground delays and stops
 aerospacefunnel ingest sigmet          # en-route hazards
 aerospacefunnel legs                   # derive flight legs from accumulated fixes
+aerospacefunnel ingest registry        # fleet registry (keyless) - adds operator
+aerospacefunnel fleet                  # build the SCD2 aircraft dimension
 aerospacefunnel warehouse              # build DuckDB views and marts
 aerospacefunnel query "SELECT * FROM mart_traffic_density"
 
@@ -94,6 +96,12 @@ All verified live on 2026-07-29. **Nothing below requires a credential.**
 | Launch windows | Launch Library 2 | 15 req/hr; `--dev` mirror is unlimited |
 | Orbital | CelesTrak GP | keyless |
 | Space weather | NOAA SWPC | keyless |
+| Fleet registry | OpenSky aircraft database | keyless, 571,950 airframes |
+
+Two sources stay dormant until you add a free key: `notam` (FAA) and `fuel` (EIA jet
+fuel spot prices). Without credentials they skip cleanly and exit 0 — they never fail a
+run. Every credential listed by `aerospacefunnel keys` names the source that consumes it;
+a key nothing reads is a bug, and a test enforces that.
 
 Optional credentials only *improve* things — see `.env.example`. OpenSky OAuth2 lifts
 400 credits/day to 4,000 and 10s to 5s resolution. **Launch Library 2 has no free key**:
@@ -118,6 +126,12 @@ the unlimited `lldev` mirror.
 - **Antimeridian hazards are handled.** Pacific FIRs report longitudes past 180 (a live
   sample carried 183.8). Naively wrapping and taking min/max would produce a box covering
   nearly the globe, silently matching every flight; crossings are detected and flagged.
+- **A hex can be reassigned to another airframe**, so `dim_aircraft` is slowly-changing
+  (type 2): an identity change closes the old version and opens a new one. Overwriting
+  would silently re-attribute every historical leg to whichever tail holds that hex today.
+- **Operator name and ICAO code are kept apart.** Coalescing them split one carrier into
+  two (`SWA` *and* `Southwest Airlines`). `operator_icao` is the controlled vocabulary and
+  the grouping key; `operator` is a display label and is not safe to group on.
 - **`alt_baro: "ground"`** is a string sentinel, not a null — 116 of 716 aircraft in one
   sample. It is the only on-ground signal the feed carries, and leg segmentation needs it.
 
@@ -157,7 +171,7 @@ systemd user timers in `systemd/` — see `systemd/README.md`. Remember
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest      # 115 tests, fully offline
+.venv/bin/python -m pytest      # 136 tests, fully offline
 .venv/bin/ruff check .
 ```
 

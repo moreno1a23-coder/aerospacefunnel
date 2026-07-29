@@ -12,9 +12,12 @@ from .adsb import SurveillanceSource
 from .airports import AirportsSource, RunwaysSource
 from .disruption import DisruptionSource
 from .flights import OpenSkySource, TokenProvider
+from .fuel import FuelPriceSource
 from .hazards import GairmetSource, SigmetSource
 from .launches import LaunchUpdateSource, LaunchWindowSource
+from .notam import NotamSource
 from .orbital import OrbitalSource
+from .registry import RegistrySource
 from .spaceweather import SpaceWeatherSource
 from .weather import MetarSource, TafSource
 
@@ -33,6 +36,9 @@ SOURCES = {
     "orbital": OrbitalSource,
     "spaceweather": SpaceWeatherSource,
     "opensky": OpenSkySource,
+    "registry": RegistrySource,
+    "notam": NotamSource,
+    "fuel": FuelPriceSource,
 }
 
 # Which layer each table belongs to, for warehouse view creation.
@@ -48,12 +54,19 @@ TABLE_LAYERS = {
     "fct_space_weather": "silver",
     "fct_opensky_state": "silver",
     "dim_airport": "silver",
+    "dim_aircraft_registry": "silver",
+    "fct_notam": "silver",
+    "fct_fuel_price": "silver",
     "dim_runway": "silver",
     "fct_flight_leg": "gold",
+    "dim_aircraft": "gold",
 }
 
 __all__ = [
     "SOURCES",
+    "RegistrySource",
+    "NotamSource",
+    "FuelPriceSource",
     "TABLE_LAYERS",
     "AirportsSource",
     "DisruptionSource",

@@ -209,3 +209,95 @@ def flight_legs(
 
     legs.sort(key=lambda leg: (leg["start_time"], leg["hex"]))
     return legs
+
+
+# ---------------------------------------------------------------- aircraft dimension
+
+# The identity attributes that define a version. A change in any of these closes the
+# current row and opens a new one.
+IDENTITY_FIELDS = ("registration", "aircraft_type", "operator", "operator_icao")
+
+
+def aircraft_dimension(
+    positions: Iterable[dict[str, Any]],
+    existing: Iterable[dict[str, Any]] = (),
+    enrichment: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Build a slowly-changing (type 2) aircraft dimension from observed positions.
+
+    ADS-B carries registration and type inline, so the fleet dimension is derived from data
+    already collected rather than fetched from a registry. `enrichment` optionally supplies
+    attributes surveillance never transmits - operator above all - keyed by hex.
+
+    Type 2 rather than overwrite-in-place because a hex can be reassigned to a different
+    airframe. Overwriting would silently re-attribute every historical leg to whichever tail
+    happens to hold that hex today, which is exactly the kind of quiet corruption that makes
+    a warehouse untrustworthy. Instead the old row gets a `valid_to` and `is_current=False`.
+
+    Returns the full set of versions - current and closed - keyed by ``(hex, valid_from)``.
+    """
+    enrichment = enrichment or {}
+
+    # Latest observation per hex that actually carries identity information.
+    observed: dict[str, dict[str, Any]] = {}
+    for row in positions:
+        hex_id = row.get("hex")
+        seen_at = row.get("snapshot_time")
+        if not hex_id or seen_at is None:
+            continue
+        extra = enrichment.get(hex_id, {})
+        identity = {
+            "registration": row.get("registration") or extra.get("registration"),
+            "aircraft_type": row.get("aircraft_type") or extra.get("aircraft_type"),
+            "operator": extra.get("operator"),
+            "operator_icao": extra.get("operator_icao"),
+        }
+        if not any(identity.values()):
+            continue
+        previous = observed.get(hex_id)
+        if previous is None or seen_at > previous["seen_at"]:
+            observed[hex_id] = {"seen_at": seen_at, **identity}
+
+    # Existing versions, newest first per hex.
+    history: dict[str, list[dict[str, Any]]] = {}
+    for row in existing:
+        if row.get("hex"):
+            history.setdefault(row["hex"], []).append(dict(row))
+    for versions in history.values():
+        versions.sort(key=lambda r: r.get("valid_from") or 0)
+
+    out: list[dict[str, Any]] = []
+    for hex_id, versions in history.items():
+        if hex_id not in observed:
+            out.extend(versions)  # untouched this run
+
+    for hex_id, current in observed.items():
+        versions = history.get(hex_id, [])
+        latest = versions[-1] if versions else None
+        identity = {f: current[f] for f in IDENTITY_FIELDS}
+
+        if latest is not None and all(latest.get(f) == identity[f] for f in IDENTITY_FIELDS):
+            # Same identity: extend the current version rather than creating a duplicate.
+            out.extend(versions[:-1])
+            out.append({**latest, "last_seen": max(latest.get("last_seen", 0), current["seen_at"])})
+            continue
+
+        if latest is not None:
+            # Identity changed - close the old version at the moment the new one appeared.
+            out.extend(versions[:-1])
+            out.append({**latest, "valid_to": current["seen_at"], "is_current": False})
+
+        out.append(
+            {
+                "hex": hex_id,
+                **identity,
+                "valid_from": current["seen_at"],
+                "valid_to": None,
+                "is_current": True,
+                "first_seen": current["seen_at"],
+                "last_seen": current["seen_at"],
+            }
+        )
+
+    out.sort(key=lambda r: (r["hex"], r.get("valid_from") or 0))
+    return out

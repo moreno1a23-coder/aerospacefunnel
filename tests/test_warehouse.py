@@ -141,7 +141,51 @@ def test_every_mart_sql_is_valid_against_its_dependencies(platform, tmp_path):
                 "inclination": 53.0,
             },
         ),
+        "dim_aircraft": (
+            "gold",
+            {
+                "hex": "a3c9b4",
+                "registration": "N343NW",
+                "aircraft_type": "A320",
+                "operator": "Delta Air Lines",
+                "operator_icao": "DAL",
+                "valid_from": 1785336000,
+                "valid_to": None,
+                "is_current": True,
+                "first_seen": 1785336000,
+                "last_seen": 1785336600,
+            },
+        ),
+        "fct_fuel_price": (
+            "silver",
+            {
+                "period": "2026-07-28",
+                "series": "EER_EPJK_PF4_RGC_DPG",
+                "product": "EPJK",
+                "product_name": "Kerosene-Type Jet Fuel",
+                "area": "GULF COAST",
+                "price": 2.31,
+                "units": "$/GAL",
+            },
+        ),
+        "fct_notam": (
+            "silver",
+            {
+                "notam_id": "NOTAM_1_1",
+                "number": "07/123",
+                "location": "KJFK",
+                "icao_location": "KJFK",
+                "type": "N",
+                "classification": "DOM",
+                "effective_start": "2026-07-29T00:00:00Z",
+                "effective_end": "2026-08-01T00:00:00Z",
+            },
+        ),
     }
+    key_columns = (
+        "leg_id", "station", "airport", "launch_id", "norad_cat_id",
+        "hex", "period", "notam_id",
+    )
     for table, (layer, row) in seed.items():
         storage.write_partition(
             root,
@@ -149,9 +193,7 @@ def test_every_mart_sql_is_valid_against_its_dependencies(platform, tmp_path):
             table,
             [row],
             ts=TS,
-            keys=tuple(
-                k for k in row if k in ("leg_id", "station", "airport", "launch_id", "norad_cat_id")
-            ),
+            keys=tuple(k for k in row if k in key_columns),
             hourly=False,
         )
 

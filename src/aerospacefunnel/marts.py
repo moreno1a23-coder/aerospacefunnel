@@ -224,6 +224,68 @@ MARTS: tuple[Mart, ...] = (
         """,
         "Orbital decay signal per catalogued object",
     ),
+    Mart(
+        "mart_fleet_identity",
+        ("dim_aircraft",),
+        """
+        -- Current identity per airframe. Closed versions stay in dim_aircraft so historical
+        -- legs keep resolving to the tail that actually flew them.
+        SELECT hex, registration, aircraft_type,
+               operator_icao,          -- controlled vocabulary: the grouping key
+               operator,               -- free-text display name, NOT safe to group on
+               to_timestamp(first_seen)::TIMESTAMP AS first_seen,
+               to_timestamp(last_seen)::TIMESTAMP  AS last_seen
+        FROM dim_aircraft
+        WHERE is_current
+        """,
+        "Current tail/type/operator per airframe (SCD2 current rows)",
+    ),
+    Mart(
+        "mart_fuel_exposure",
+        ("fct_flight_leg", "fct_fuel_price"),
+        """
+        -- Excess miles are burnt fuel, and fuel has a price. A widebody burns roughly
+        -- 6 US gal/nm and a narrowbody roughly 2.5; 3.5 is used as a fleet-mixed midpoint.
+        -- This is an ORDER-OF-MAGNITUDE estimate, not an accounting figure: real burn
+        -- depends on weight, altitude and winds none of which are in public data.
+        WITH latest_price AS (
+            SELECT price, units, period
+            FROM fct_fuel_price
+            WHERE price IS NOT NULL
+            ORDER BY period DESC
+            LIMIT 1
+        )
+        SELECT l.aircraft_type,
+               COUNT(*)                                              AS legs,
+               ROUND(SUM(l.track_distance_nm - l.direct_distance_nm)) AS excess_nm,
+               ANY_VALUE(p.price)                                    AS fuel_price,
+               ANY_VALUE(p.units)                                    AS price_units,
+               ANY_VALUE(p.period)                                   AS price_date,
+               ROUND(SUM(l.track_distance_nm - l.direct_distance_nm) * 3.5
+                     * ANY_VALUE(p.price), 2)                        AS est_excess_cost
+        FROM fct_flight_leg l
+        CROSS JOIN latest_price p
+        WHERE l.direct_distance_nm IS NOT NULL
+        GROUP BY l.aircraft_type
+        HAVING COUNT(*) >= 3
+        """,
+        "Order-of-magnitude cost of excess miles flown, at latest jet fuel spot price",
+    ),
+    Mart(
+        "mart_notam_impact",
+        ("fct_notam",),
+        """
+        SELECT icao_location AS airport,
+               classification,
+               type,
+               COUNT(*) AS notams,
+               MIN(effective_start) AS earliest_start,
+               MAX(effective_end)   AS latest_end
+        FROM fct_notam
+        GROUP BY 1, 2, 3
+        """,
+        "Active NOTAMs per aerodrome by class",
+    ),
 )
 
 

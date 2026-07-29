@@ -1,0 +1,13 @@
+'icao24','timestamp','acars','adsb','built','categoryDescription','country','engines','firstFlightDate','firstSeen','icaoAircraftClass','lineNumber','manufacturerIcao','manufacturerName','model','modes','nextReg','notes','operator','operatorCallsign','operatorIata','operatorIcao','owner','prevReg','regUntil','registered','registration','selCal','serialNumber','status','typecode','vdl'
+'000001','2016-11-27 00:10:39',0,0,,'',,'',,,L1P,'',SHIJIAZHUANG,'',Antonov 2,0,'','','','','','',Private,'',,,SP-FGR,'','','',AN2,0
+a00624,'2022-09-13 19:00:00',0,0,,'',United States,P&W PT6SER TP,,,L2T,'',SWEARINGEN,Beech,C90,0,'','','','','','',Southwest Aviation Inc,'','2030-01-31',,N100QT,'',LJ689,'',BE9L,0
+a00b37,'2023-04-06 19:00:00',0,0,,'',United States,CONT MOTOR IO-550 SERIES,,,L1P,'',MOONEY,Mooney,M20R,0,'','','','','','',Southwest Medical Associates Inc,'','2027-12-31',,N1013L,'','29-0327','',M20P,0
+a018e2,'2023-04-06 19:00:00',0,0,,'',United States,P&W PT6A SER,,,'','','',Piaggio,P180,0,'','','','','','',Southwest Aviation Specialties Llc,'','2027-12-31',,N105SL,'','1068','','',0
+a01b3e,'2022-10-17 19:00:00',0,0,,'',United States,'',,,H1T,'',UNC,Southwest Florida Aviation,SW204,0,'','','','','','',Southwest Florida Aviation Inc,'','2030-03-31',,N106CP,'','1170','',UH1,0
+a02050,'2023-01-21 19:00:00',0,0,,'',United States,P&W CANADA PT6A-6 SERIES,,,L2T,'',PIAGGIO,Piaggio,P180,0,'','','','','','',Southwest Aviation Specialties Llc,'','2027-03-31',,N107SL,'','1073','',P180,0
+a026ee,'2017-09-15 00:10:07',0,0,,'',United States,'',,,L2J,'',CESSNA,Cessna,Citation II,0,'','','','','','',Southwest Financial Inc,'',,,N109JC,'','550-0099','',C550,0
+a0547d,'2023-03-03 19:00:00',0,0,,'',United States,HONEYWELL AS907-1-1A,,,L2J,'',BOMBARDIER,Bombardier Inc,BD-100-1A10,0,'','','','','','',Southwestern Jet Inc,'','2027-07-31',,N120JC,'','20069','',CL30,0
+a05f94,'2023-03-09 19:00:00',0,0,,'',United States,ROLLS-ROYC 250-C40B,,,H1T,'',PANHA,Bell Helicopter Textron,'206L-1',0,'','','','','','',Southwest Heliservices Llc,'','2027-08-31',,N123HP,'','45394','',B06,0
+a0a05e,'2021-04-12 19:00:00',0,0,,'',United States,P&W R-985 SERIES,,,L1P,'',SERV-AERO,Grumman Acft Eng Cor-schweizer,G-164A,0,'','','','','','',Southwest Aerial Llc,'','2028-09-30',,N14AG,'','1704','',G164,0
+a0a14e,'2023-02-28 19:00:00',0,0,,'',United States,CONT MOTOR O-200A,,,L1P,'',TEXAS SPORT,Cub Crafters Inc,CC11-100,0,'','','','','','',Southwest Vencap Partners Llc,'','2030-03-31',,N14KX,'',CC11-00060,'',PA11,0
+a0bec9,'2015-07-30 19:00:00',0,0,,'',United States,'',,,'','','',Dji,S1000+,0,'',,'','','','',Southwestern Public Service Co,'','2018-07-31',,N147XL,'','03P0010675','','',0

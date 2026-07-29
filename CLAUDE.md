@@ -18,7 +18,7 @@ Repo: https://github.com/moreno1a23-coder/aerospacefunnel
 ## Working here
 
 ```bash
-.venv/bin/python -m pytest      # 115 tests, fully offline
+.venv/bin/python -m pytest      # 136 tests, fully offline
 .venv/bin/ruff check .
 ```
 
@@ -38,6 +38,13 @@ Repo: https://github.com/moreno1a23-coder/aerospacefunnel
 - **Never assign an airport to an unobserved endpoint.** `derive.py` returns NULL when the
   aircraft was not seen on the ground within the radius. Guessing would corrupt every
   utilisation and punctuality figure downstream. `complete` is the flag that matters.
+- **The OpenSky registry CSV quotes with `'`, not `"`.** Parsing it with the default
+  quotechar makes a stray `"` swallow the rest of the file and blow the csv field limit.
+  `sources/registry.py` sets `quotechar="'"` and raises `field_size_limit`.
+- **Never coalesce `operator` with `operator_icao`.** The free-text name sometimes already
+  contains a code, so falling back splits one carrier into two. Group on `operator_icao`.
+- **`dim_aircraft` is SCD2.** Close the old version and open a new one on identity change;
+  never overwrite in place.
 - **Adding a table means three edits**: register the source in `sources/__init__.py`, add it
   to `TABLE_LAYERS`, and add expectations to `quality.SUITES`.
 

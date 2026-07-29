@@ -147,6 +147,19 @@ SUITES: dict[str, list[Expectation]] = {
     ],
     "fct_disruption": [unique(["airport", "delay_type", "observed_at"]), not_null("airport")],
     "fct_hazard": [unique(["hazard_id"]), not_null("hazard_id")],
+    "fct_notam": [unique(["notam_id"]), not_null("notam_id"), not_null("location")],
+    "fct_fuel_price": [
+        unique(["period", "series"]),
+        not_null("period"),
+        # A jet fuel spot price outside this band means the series or units changed.
+        in_range("price", 0, 25),
+    ],
+    "dim_aircraft_registry": [unique(["icao24"]), not_null("icao24")],
+    "dim_aircraft": [
+        unique(["hex", "valid_from"]),
+        not_null("hex"),
+        not_null("valid_from"),
+    ],
 }
 
 

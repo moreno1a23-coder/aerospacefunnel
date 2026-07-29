@@ -20,6 +20,10 @@ class Credential:
     name: str
     signup_url: str
     purpose: str
+    # The source that actually reads this credential. Every entry must name one - a test
+    # enforces it. Advertising a key that nothing consumes sends the user off to register
+    # for something with no effect, which is worse than not offering it at all.
+    consumed_by: str
     required_with: tuple[str, ...] = ()  # names that must all be set together
 
 
@@ -29,42 +33,47 @@ CREDENTIALS = (
         "OPENSKY_CLIENT_ID",
         "https://opensky-network.org/",
         "OpenSky OAuth2 - lifts 400 credits/day to 4,000 and 10s to 5s resolution",
+        consumed_by="opensky",
         required_with=("OPENSKY_CLIENT_SECRET",),
     ),
     Credential(
         "OPENSKY_CLIENT_SECRET",
         "https://opensky-network.org/",
         "OpenSky OAuth2 client secret",
+        consumed_by="opensky",
         required_with=("OPENSKY_CLIENT_ID",),
     ),
     Credential(
         "FAA_NOTAM_CLIENT_ID",
         "https://api.faa.gov/s/",
         "FAA NOTAM API - live notices to airmen",
+        consumed_by="notam",
         required_with=("FAA_NOTAM_CLIENT_SECRET",),
     ),
     Credential(
         "FAA_NOTAM_CLIENT_SECRET",
         "https://api.faa.gov/s/",
         "FAA NOTAM API client secret",
+        consumed_by="notam",
         required_with=("FAA_NOTAM_CLIENT_ID",),
     ),
     Credential(
         "EIA_API_KEY",
         "https://www.eia.gov/opendata/register.php",
-        "EIA - jet fuel spot prices for cost analytics",
-    ),
-    Credential(
-        "NASA_API_KEY",
-        "https://api.nasa.gov/",
-        "NASA - space weather (DONKI). Free key is 1,000/hr vs DEMO_KEY's 10",
+        "EIA - jet fuel spot prices, for the cost side of route efficiency",
+        consumed_by="fuel",
     ),
     Credential(
         "LL2_TOKEN",
         "https://www.patreon.com/TheSpaceDevs",
         "Launch Library 2 - PAID (Patreon). No free tier above 15 req/hr",
+        consumed_by="launches",
     ),
 )
+
+# NASA_API_KEY was deliberately removed rather than given a source: space weather is already
+# covered keylessly by NOAA SWPC in sources/spaceweather.py, so asking the user to register
+# for a NASA key would buy them nothing.
 
 BY_NAME = {c.name: c for c in CREDENTIALS}
 

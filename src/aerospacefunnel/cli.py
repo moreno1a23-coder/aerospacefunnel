@@ -127,8 +127,23 @@ def cmd_ingest(args, cfg: config_mod.Config) -> int:
         source = factory(token_provider=provider)
     elif args.source == "orbital":
         source = factory(group=args.group)
+    elif args.source == "notam":
+        source = factory(
+            stations,
+            client_id=creds.get("FAA_NOTAM_CLIENT_ID"),
+            client_secret=creds.get("FAA_NOTAM_CLIENT_SECRET"),
+        )
+    elif args.source == "fuel":
+        source = factory(api_key=creds.get("EIA_API_KEY"))
     else:
         source = factory()
+
+    # A source needing credentials it does not have is skipped, not failed: the platform
+    # must run end to end with an empty .env.
+    if hasattr(source, "configured") and not source.configured:
+        needed = [c.name for c in CREDENTIALS if c.consumed_by == args.source]
+        print(f"{args.source}: skipped - needs {', '.join(needed)} (see `aerospacefunnel keys`)")
+        return 0
 
     throttle_key = getattr(source, "throttle_key", THROTTLE_KEYS.get(args.source, args.source))
     if args.source == "opensky":
@@ -141,7 +156,7 @@ def cmd_ingest(args, cfg: config_mod.Config) -> int:
         throttle=Throttle(METADATA_DB),
         throttle_key=throttle_key,
         # Reference dimensions change slowly; a daily partition avoids 24 copies a day.
-        hourly=args.source not in ("airports", "runways"),
+        hourly=args.source not in ("airports", "runways", "registry", "fuel"),
         dry_run=args.dry_run,
     )
     verb = "would write" if args.dry_run else "wrote"
@@ -193,6 +208,47 @@ def cmd_legs(args, cfg: config_mod.Config) -> int:
         f"derived {written} legs from {len(positions)} fixes "
         f"({complete} with both endpoints observed, "
         f"{written - complete} partial - aircraft transiting the hub radius)"
+    )
+    return 0
+
+
+def cmd_fleet(args, cfg: config_mod.Config) -> int:
+    """Build the SCD2 aircraft dimension from observed positions plus registry enrichment."""
+    from datetime import UTC, datetime
+
+    positions = storage.read_table(cfg.storage_root, "silver", "fct_position")
+    if not positions:
+        print("no positions yet - run `poll` first")
+        return 1
+
+    # Registry supplies operator, which ADS-B never transmits.
+    enrichment = {
+        r["icao24"]: r
+        for r in storage.read_table(cfg.storage_root, "silver", "dim_aircraft_registry")
+        if r.get("icao24")
+    }
+    existing = storage.read_table(cfg.storage_root, "gold", "dim_aircraft")
+
+    rows = derive.aircraft_dimension(positions, existing, enrichment)
+    if not rows:
+        print(f"{len(positions)} fixes carried no identity information")
+        return 0
+
+    storage.write_partition(
+        cfg.storage_root,
+        "gold",
+        "dim_aircraft",
+        rows,
+        ts=datetime.now(UTC),
+        keys=("hex", "valid_from"),
+        hourly=False,
+    )
+    current = sum(1 for r in rows if r.get("is_current"))
+    with_operator = sum(1 for r in rows if r.get("operator"))
+    print(
+        f"{len(rows)} identity versions for {current} airframes "
+        f"({len(rows) - current} superseded, {with_operator} with operator"
+        f"{'' if enrichment else ' - run `ingest registry` to add operators'})"
     )
     return 0
 
@@ -280,8 +336,8 @@ def cmd_keys(args, cfg: config_mod.Config) -> int:
     """
     creds = Credentials()
     present = 0
-    print("credential                  status    purpose")
-    print("-" * 96)
+    print(f"{'credential':<27} {'status':<9} {'used by':<10} purpose")
+    print("-" * 100)
     for cred in CREDENTIALS:
         has = creds.has(cred.name)
         present += has
@@ -291,9 +347,9 @@ def cmd_keys(args, cfg: config_mod.Config) -> int:
             status = "set"
         else:
             status = "-"
-        print(f"{cred.name:<27} {status:<9} {cred.purpose}")
+        print(f"{cred.name:<27} {status:<9} {cred.consumed_by:<10} {cred.purpose}")
         if not has:
-            print(f"{'':<27} {'':<9} get one: {cred.signup_url}")
+            print(f"{'':<27} {'':<9} {'':<10} get one: {cred.signup_url}")
 
     print(
         f"\n{present}/{len(CREDENTIALS)} set. None are required - all sources have an "
@@ -403,6 +459,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     legs = sub.add_parser("legs", help="derive flight legs from position fixes")
     legs.set_defaults(func=cmd_legs)
+
+    fleet = sub.add_parser("fleet", help="build the SCD2 aircraft dimension")
+    fleet.set_defaults(func=cmd_fleet)
 
     check = sub.add_parser("check", help="run data-quality expectations")
     check.set_defaults(func=cmd_check)
