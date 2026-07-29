@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="aerospacefunnel — aviation data platform built on public feeds. Live warehouse figures and stated boundaries.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛫</text></svg>">
+<title>aerospacefunnel — build preview</title>
+<style>
+  /* ─── tokens ─────────────────────────────────────────────────────────────
+     Ground is a dimmed ops-room display: slate with a cyan bias, never pure
+     black. The lone accent is sodium amber — runway edge lighting. Flight
+     categories use the real FAA METAR colours, which is why semantic colour
+     is deliberately separate from the accent.                              */
+  :root {
+    --ground:    #EDF1F2;
+    --panel:     #FFFFFF;
+    --panel-alt: #E3E9EB;
+    --line:      #C6D1D5;
+    --line-soft: #D8E0E3;
+    --ink:       #10191D;
+    --ink-mid:   #46565D;
+    --ink-dim:   #6B7C83;
+    --accent:    #A9701A;
+    --accent-bg: #F5E4C4;
+    --vfr:       #26714A;
+    --mvfr:      #2C5FA0;
+    --ifr:       #B4302A;
+    --lifr:      #8A3FA8;
+    --ok:        #26714A;
+    --warn:      #A9701A;
+    --crit:      #B4302A;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+    --step: 0.5rem;
+    --radius: 3px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:    #0D1317;
+      --panel:     #131C21;
+      --panel-alt: #18242A;
+      --line:      #2A3940;
+      --line-soft: #1F2C32;
+      --ink:       #DCE6E9;
+      --ink-mid:   #96A8AF;
+      --ink-dim:   #6E8188;
+      --accent:    #D9962B;
+      --accent-bg: #2A2113;
+      --vfr:       #4FB37A;
+      --mvfr:      #5A93DB;
+      --ifr:       #E05B52;
+      --lifr:      #B96FD4;
+      --ok:        #4FB37A;
+      --warn:      #D9962B;
+      --crit:      #E05B52;
+    }
+  }
+  /* The viewer's toggle must win over the OS preference, in both directions. */
+  :root[data-theme="dark"] {
+    --ground:#0D1317; --panel:#131C21; --panel-alt:#18242A; --line:#2A3940;
+    --line-soft:#1F2C32; --ink:#DCE6E9; --ink-mid:#96A8AF; --ink-dim:#6E8188;
+    --accent:#D9962B; --accent-bg:#2A2113;
+    --vfr:#4FB37A; --mvfr:#5A93DB; --ifr:#E05B52; --lifr:#B96FD4;
+    --ok:#4FB37A; --warn:#D9962B; --crit:#E05B52;
+  }
+  :root[data-theme="light"] {
+    --ground:#EDF1F2; --panel:#FFFFFF; --panel-alt:#E3E9EB; --line:#C6D1D5;
+    --line-soft:#D8E0E3; --ink:#10191D; --ink-mid:#46565D; --ink-dim:#6B7C83;
+    --accent:#A9701A; --accent-bg:#F5E4C4;
+    --vfr:#26714A; --mvfr:#2C5FA0; --ifr:#B4302A; --lifr:#8A3FA8;
+    --ok:#26714A; --warn:#A9701A; --crit:#B4302A;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: calc(var(--step) * 4) calc(var(--step) * 3) calc(var(--step) * 10);
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--step) * 5);
+  }
+
+  /* ─── masthead ─────────────────────────────────────────────────────── */
+  .masthead { display: flex; flex-direction: column; gap: var(--step); }
+  .rule {
+    height: 3px; background: var(--accent); width: 68px; border-radius: 2px;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(1.6rem, 4vw, 2.3rem);
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .tagline { color: var(--ink-mid); max-width: 62ch; margin: 0; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin: 0;
+  }
+
+  /* ─── status rail: the ATIS line of this page ──────────────────────── */
+  .rail {
+    display: flex; flex-wrap: wrap; gap: calc(var(--step) * 2);
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--ok);
+    border-radius: var(--radius);
+    padding: calc(var(--step) * 1.75) calc(var(--step) * 2);
+    font-family: var(--mono);
+    font-size: 0.8rem;
+  }
+  .rail-item { display: flex; align-items: baseline; gap: calc(var(--step) * 0.75); }
+  .rail-item b { color: var(--ink); font-weight: 600; }
+  .rail-item span { color: var(--ink-dim); }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ok); display: inline-block; flex: none;
+    align-self: center;
+  }
+
+  /* ─── kpi row ──────────────────────────────────────────────────────── */
+  .kpis {
+    display: grid; gap: calc(var(--step) * 1.5);
+    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  }
+  .kpi {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: calc(var(--step) * 2);
+    display: flex; flex-direction: column; gap: calc(var(--step) * 0.5);
+  }
+  .kpi .n {
+    font-family: var(--mono);
+    font-size: 1.6rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .kpi .l {
+    font-size: 0.76rem; color: var(--ink-dim);
+    font-family: var(--mono); letter-spacing: 0.05em;
+  }
+  .kpi .sub { font-size: 0.72rem; color: var(--ink-dim); }
+
+  /* ─── panels & grid ────────────────────────────────────────────────── */
+  .grid {
+    display: grid; gap: calc(var(--step) * 3);
+    grid-template-columns: 1.35fr 1fr;
+    align-items: start;
+  }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  .col { display: flex; flex-direction: column; gap: calc(var(--step) * 3); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: var(--step);
+    padding: calc(var(--step) * 1.75) calc(var(--step) * 2);
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--panel-alt);
+  }
+  .panel-head h2 {
+    font-family: var(--mono); font-size: 0.82rem; margin: 0;
+    letter-spacing: 0.07em; text-transform: uppercase; font-weight: 600;
+  }
+  .panel-head .meta { font-size: 0.72rem; color: var(--ink-dim); font-family: var(--mono); }
+  .panel-body { padding: calc(var(--step) * 2); }
+  .scroll { overflow-x: auto; }
+
+  /* ─── tables ───────────────────────────────────────────────────────── */
+  table { border-collapse: collapse; width: 100%; font-size: 0.83rem; }
+  th {
+    text-align: left; font-family: var(--mono); font-weight: 600;
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-dim);
+    padding: calc(var(--step) * 0.75) calc(var(--step) * 1.25);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  td {
+    padding: calc(var(--step) * 1) calc(var(--step) * 1.25);
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: middle;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .code { font-family: var(--mono); font-weight: 600; }
+  .muted { color: var(--ink-dim); }
+
+  /* ─── flight category pills: the real FAA vocabulary ───────────────── */
+  .cat {
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 2px 7px; border-radius: 2px;
+    border: 1px solid currentColor;
+    display: inline-block;
+  }
+  .cat-VFR  { color: var(--vfr); }
+  .cat-MVFR { color: var(--mvfr); }
+  .cat-IFR  { color: var(--ifr); }
+  .cat-LIFR { color: var(--lifr); }
+
+  /* ─── severity: encoded in form, not only number ───────────────────── */
+  .sev { border-left: 3px solid var(--line); }
+  .sev-crit { border-left-color: var(--crit); }
+  .sev-warn { border-left-color: var(--warn); }
+
+  /* ─── ratio bars: baseline 1.0 = straight line flown ───────────────── */
+  .bar-track {
+    position: relative; height: 7px; background: var(--panel-alt);
+    border-radius: 2px; min-width: 90px; overflow: hidden;
+  }
+  .bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 2px; }
+  .bar-fill.low { background: var(--vfr); }
+
+  /* ─── honesty callout — load-bearing, not a footnote ───────────────── */
+  .callout {
+    background: var(--accent-bg);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: calc(var(--step) * 2.5);
+    display: flex; flex-direction: column; gap: var(--step);
+  }
+  .callout h2 {
+    font-family: var(--mono); font-size: 0.82rem; margin: 0;
+    letter-spacing: 0.07em; text-transform: uppercase;
+  }
+  .callout p { margin: 0; max-width: 74ch; }
+  .coverage {
+    display: flex; align-items: center; gap: calc(var(--step) * 1.5);
+    font-family: var(--mono); font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    margin-top: var(--step);
+  }
+  .coverage .track {
+    flex: 1; height: 10px; background: var(--panel);
+    border: 1px solid var(--accent); border-radius: 2px;
+    position: relative; overflow: hidden; min-width: 120px;
+  }
+  /* 1 of 1,691 is 0.06% — given a 2px floor so it is visible at all.
+     Its near-invisibility is the point. */
+  .coverage .fill { position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--accent); }
+
+  /* ─── source inventory ─────────────────────────────────────────────── */
+  .sources { display: grid; gap: calc(var(--step) * 1.25); grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .src {
+    border: 1px solid var(--line-soft); border-radius: var(--radius);
+    padding: calc(var(--step) * 1.5);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .src .n { font-family: var(--mono); font-size: 0.8rem; font-weight: 600; }
+  .src .d { font-size: 0.74rem; color: var(--ink-dim); }
+  .tag {
+    font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--ok); align-self: flex-start;
+    margin-top: 2px;
+  }
+  .tag.dormant { color: var(--ink-dim); }
+
+  .limits { display: flex; flex-direction: column; gap: var(--step); }
+  .limits li { margin-bottom: calc(var(--step) * 0.75); }
+  .limits ul { margin: 0; padding-left: 1.1rem; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: calc(var(--step) * 2);
+    font-size: 0.76rem; color: var(--ink-dim);
+    font-family: var(--mono);
+    display: flex; flex-wrap: wrap; gap: calc(var(--step) * 2);
+    justify-content: space-between;
+  }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="rule"></div>
+    <p class="eyebrow">Build preview · pre-delivery verification</p>
+    <h1>aerospacefunnel</h1>
+    <p class="tagline">
+      An aviation data platform built entirely on public feeds — live surveillance, weather,
+      hazards and disruption funnelled into a layered Parquet warehouse queried with DuckDB.
+      Every figure on this page came out of the warehouse, not an estimate.
+    </p>
+  </header>
+
+  <div class="rail">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="rail-item"><b>CI PASS</b><span>3.11 / 3.12 / 3.13</span></span>
+    <span class="rail-item"><b>137</b><span>tests, all passing</span></span>
+    <span class="rail-item"><b>offline proof</b><span>suite re-run with sockets denied</span></span>
+    <span class="rail-item"><b>33/33</b><span>quality gates on live data</span></span>
+    <span class="rail-item"><b>0cba4e9</b><span>in sync with origin/main</span></span>
+  </div>
+
+  <section class="kpis">
+    <div class="kpi">
+      <span class="n">18,954</span>
+      <span class="l">POSITION FIXES</span>
+      <span class="sub">across 3 hubs, 6 sweeps</span>
+    </div>
+    <div class="kpi">
+      <span class="n">2,630</span>
+      <span class="l">AIRFRAMES</span>
+      <span class="sub">distinct, SCD2 tracked</span>
+    </div>
+    <div class="kpi">
+      <span class="n">571,950</span>
+      <span class="l">REGISTRY ROWS</span>
+      <span class="sub">keyless fleet reference</span>
+    </div>
+    <div class="kpi">
+      <span class="n">47,975</span>
+      <span class="l">AERODROMES</span>
+      <span class="sub">global, with runways</span>
+    </div>
+    <div class="kpi">
+      <span class="n">133</span>
+      <span class="l">ACTIVE HAZARDS</span>
+      <span class="sub">SIGMET, with geometry</span>
+    </div>
+  </section>
+
+  <div class="grid">
+    <!-- ── live network state ─────────────────────────────────────────── -->
+    <div class="col">
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Hub surveillance</h2>
+          <span class="meta">adsb.lol · keyless</span>
+        </div>
+        <div class="panel-body scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Hub</th>
+                <th scope="col" class="num">Aircraft</th>
+                <th scope="col" class="num">Fixes</th>
+                <th scope="col" class="num">On ground</th>
+                <th scope="col" class="num">Avg alt</th>
+                <th scope="col" class="num">Types</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="code">KORD</td><td class="num">2,198</td><td class="num">8,548</td><td class="num">69</td><td class="num">12,246 ft</td><td class="num">192</td></tr>
+              <tr><td class="code">KJFK</td><td class="num">1,668</td><td class="num">6,560</td><td class="num">326</td><td class="num">15,916 ft</td><td class="num">157</td></tr>
+              <tr><td class="code">KLAX</td><td class="num">969</td><td class="num">3,846</td><td class="num">245</td><td class="num">17,775 ft</td><td class="num">119</td></tr>
+            </tbody>
+          </table>
+          <p class="src d" style="margin:calc(var(--step)*1.5) 0 0">
+            Aircraft counts are per hub and overlap where one airframe was seen at more than
+            one. The distinct fleet total is 2,630.
+          </p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Network disruption</h2>
+          <span class="meta">FAA NAS status · live</span>
+        </div>
+        <div class="panel-body scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Airport</th>
+                <th scope="col">Programme</th>
+                <th scope="col">Cause</th>
+                <th scope="col" class="num">Avg</th>
+                <th scope="col" class="num">Max</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="sev sev-crit">
+                <td class="code">BOS</td><td>Ground Delay</td><td>low ceilings</td>
+                <td class="num">1 h 46 m</td><td class="num">5 h 19 m</td>
+              </tr>
+              <tr class="sev sev-warn">
+                <td class="code">SFO</td><td>Ground Delay</td><td>low ceilings</td>
+                <td class="num">41 m</td><td class="num">1 h 40 m</td>
+              </tr>
+              <tr class="sev">
+                <td class="code">SAN</td><td>Arr/Dep delay</td><td>compacted demand</td>
+                <td class="num muted">—</td><td class="num muted">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Route efficiency</h2>
+          <span class="meta">flown ÷ direct · 1.00 = straight</span>
+        </div>
+        <div class="panel-body scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Type</th>
+                <th scope="col" class="num">Legs</th>
+                <th scope="col" class="num">Ratio</th>
+                <th scope="col" style="width:38%">Excess over direct</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="code">C172</td><td class="num">159</td><td class="num">1.613</td><td><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div></td></tr>
+              <tr><td class="code">P28A</td><td class="num">78</td><td class="num">1.539</td><td><div class="bar-track"><div class="bar-fill" style="width:88%"></div></div></td></tr>
+              <tr><td class="code">B738</td><td class="num">64</td><td class="num">1.187</td><td><div class="bar-track"><div class="bar-fill low" style="width:31%"></div></div></td></tr>
+              <tr><td class="code">B38M</td><td class="num">47</td><td class="num">1.144</td><td><div class="bar-track"><div class="bar-fill low" style="width:24%"></div></div></td></tr>
+              <tr><td class="code">E75L</td><td class="num">101</td><td class="num">1.141</td><td><div class="bar-track"><div class="bar-fill low" style="width:23%"></div></div></td></tr>
+              <tr><td class="code">CRJ9</td><td class="num">46</td><td class="num">1.105</td><td><div class="bar-track"><div class="bar-fill low" style="width:17%"></div></div></td></tr>
+              <tr><td class="code">A320</td><td class="num">38</td><td class="num">1.050</td><td><div class="bar-track"><div class="bar-fill low" style="width:8%"></div></div></td></tr>
+            </tbody>
+          </table>
+          <p class="src d" style="margin:calc(var(--step)*1.5) 0 0">
+            The split is real and expected: trainers fly circuits and airwork, so their track
+            far exceeds the direct line. Airliners fly close to straight.
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ── derived + reference ────────────────────────────────────────── -->
+    <div class="col">
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Aerodrome weather</h2>
+          <span class="meta">NOAA AWC</span>
+        </div>
+        <div class="panel-body scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Stn</th>
+                <th scope="col">Cat</th>
+                <th scope="col" class="num">Vis</th>
+                <th scope="col" class="num">Ceiling</th>
+                <th scope="col" class="num">Wind</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="code">KJFK</td><td><span class="cat cat-VFR">VFR</span></td><td class="num">10 sm</td><td class="num">3,500 ft</td><td class="num">10 kt</td></tr>
+              <tr><td class="code">KORD</td><td><span class="cat cat-VFR">VFR</span></td><td class="num">10 sm</td><td class="num muted">none</td><td class="num">9 kt</td></tr>
+              <tr><td class="code">KLAX</td><td><span class="cat cat-MVFR">MVFR</span></td><td class="num">9 sm</td><td class="num">1,800 ft</td><td class="num">5 kt</td></tr>
+            </tbody>
+          </table>
+          <p class="src d" style="margin:calc(var(--step)*1.5) 0 0">
+            Ceilings are derived from broken/overcast layers only — scattered and few are not
+            a ceiling. KLAX at 1,800 ft agrees with its reported MVFR.
+          </p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Carriers</h2>
+          <span class="meta">grouped on ICAO code</span>
+        </div>
+        <div class="panel-body scroll">
+          <table>
+            <thead>
+              <tr><th scope="col">Code</th><th scope="col">Operator</th><th scope="col" class="num">Fleet</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="code">DAL</td><td>Delta Air Lines</td><td class="num">156</td></tr>
+              <tr><td class="code">SWA</td><td>Southwest Airlines</td><td class="num">133</td></tr>
+              <tr><td class="code">UAL</td><td>United Airlines</td><td class="num">129</td></tr>
+              <tr><td class="code">AAL</td><td>American Airlines</td><td class="num">129</td></tr>
+              <tr><td class="code">JBU</td><td>JetBlue Airways</td><td class="num">54</td></tr>
+              <tr><td class="code">SKW</td><td>United Express</td><td class="num">45</td></tr>
+              <tr><td class="code">EJA</td><td>NetJets</td><td class="num">26</td></tr>
+              <tr><td class="code">ASA</td><td>Alaska Airlines</td><td class="num">25</td></tr>
+            </tbody>
+          </table>
+          <p class="src d" style="margin:calc(var(--step)*1.5) 0 0">
+            ADS-B never transmits an operator — these come from the keyless registry. Grouping
+            uses the ICAO code, not the free-text name, which otherwise splits one carrier in two.
+          </p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>En-route hazards</h2>
+          <span class="meta">SIGMET · active</span>
+        </div>
+        <div class="panel-body scroll">
+          <table>
+            <thead>
+              <tr><th scope="col">Hazard</th><th scope="col" class="num">Count</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Thunderstorm</td><td class="num">87</td></tr>
+              <tr><td>Turbulence</td><td class="num">21</td></tr>
+              <tr><td>Volcanic ash</td><td class="num">15</td></tr>
+              <tr><td>Icing</td><td class="num">6</td></tr>
+              <tr><td>Mountain wave</td><td class="num">2</td></tr>
+              <tr><td>Tropical cyclone</td><td class="num">1</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ── the caveat that governs how everything above should be read ──── -->
+  <section class="callout">
+    <h2>Read the flight legs with this in mind</h2>
+    <p>
+      Hub-radius polling only sees an aircraft inside the bubble, so most legs are transits
+      whose real origin and destination were never observed. Those carry NULL endpoints and
+      <code>complete = false</code> — never a guessed nearest airport, because a guessed
+      origin would quietly corrupt every utilisation and punctuality figure downstream.
+    </p>
+    <div class="coverage">
+      <span><b>1</b> complete</span>
+      <div class="track" role="img" aria-label="1 of 1,691 legs complete, about 0.06 percent">
+        <div class="fill"></div>
+      </div>
+      <span>1,691 total · 0.06%</span>
+    </div>
+    <p style="font-size:0.82rem">
+      That ratio is a 9-minute observation window, not a defect. It is shown because the flag
+      is load-bearing: longer runs raise it, and nothing downstream pretends otherwise.
+    </p>
+  </section>
+
+  <!-- ── sources ──────────────────────────────────────────────────────── -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Sources</h2>
+      <span class="meta">15 registered · none require a credential</span>
+    </div>
+    <div class="panel-body">
+      <div class="sources">
+        <div class="src"><span class="n">adsb.lol → airplanes.live → adsb.fi</span><span class="d">Surveillance, automatic failover</span><span class="tag">keyless</span></div>
+        <div class="src"><span class="n">NOAA Aviation Weather Center</span><span class="d">METAR, TAF, SIGMET, G-AIRMET</span><span class="tag">keyless</span></div>
+        <div class="src"><span class="n">FAA NAS status</span><span class="d">Ground delay programmes and stops</span><span class="tag">keyless</span></div>
+        <div class="src"><span class="n">OurAirports</span><span class="d">Aerodromes, runways, navaids</span><span class="tag">keyless</span></div>
+        <div class="src"><span class="n">OpenSky aircraft database</span><span class="d">Fleet registry, operator</span><span class="tag">keyless</span></div>
+        <div class="src"><span class="n">Launch Library 2</span><span class="d">Launch windows as airspace closure</span><span class="tag">keyless</span></div>
+        <div class="src"><span class="n">CelesTrak · NOAA SWPC</span><span class="d">Orbital elements, space weather</span><span class="tag">keyless</span></div>
+        <div class="src"><span class="n">FAA NOTAM · EIA jet fuel</span><span class="d">Skip cleanly and exit 0 without a key</span><span class="tag dormant">dormant — free key</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── boundaries ───────────────────────────────────────────────────── -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>What this is not</h2>
+      <span class="meta">stated up front</span>
+    </div>
+    <div class="panel-body limits">
+      <p style="margin:0 0 var(--step); max-width:74ch">
+        A production-grade platform <em>over public data</em>. Engineering cannot make it a
+        full airline data platform, so the boundaries are part of the deliverable:
+      </p>
+      <ul>
+        <li><b>No public API at any price:</b> passenger bookings, crew rostering, maintenance records, fuel uplift, cargo manifests, revenue accounting — all internal systems.</li>
+        <li><b>Needs paid feeds:</b> published schedules (OAG / Cirium). ADS-B yields actuals only, which is why the mart is named <code>mart_punctuality_proxy</code> and compares each callsign against its own rolling median rather than a timetable.</li>
+        <li><b>Coverage gaps are real:</b> community ADS-B has no mid-ocean ground stations; satellite ADS-B is commercial.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <span>github.com/moreno1a23-coder/aerospacefunnel</span>
+    <span>Snapshot 2026-07-29 · figures from the warehouse, not estimates</span>
+  </footer>
+</div>
+</body>
+</html>
