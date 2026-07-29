@@ -1,5 +1,7 @@
 # aerospacefunnel
 
+**Live preview:** https://moreno1a23-coder.github.io/aerospacefunnel/ — a snapshot of real warehouse figures.
+
 A commercial-grade aviation data platform built entirely on public feeds. It funnels live
 surveillance, weather, hazards, disruption and reference data into a layered Parquet
 warehouse queried with DuckDB.
