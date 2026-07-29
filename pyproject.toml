@@ -5,11 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aerospacefunnel"
 version = "0.1.0"
-description = "ETL pipeline that funnels public aerospace data into a local SQLite warehouse"
+description = "Aviation data platform: live public feeds into a layered Parquet/DuckDB warehouse"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = ["requests>=2.31"]
+dependencies = [
+    "requests>=2.31",
+    "pyarrow>=15",   # Parquet writer for the silver/gold layers
+    "duckdb>=1.0",   # query engine over those Parquet partitions
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
