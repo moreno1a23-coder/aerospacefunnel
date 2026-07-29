@@ -1,36 +1,48 @@
 # aerospacefunnel
 
-Python ETL pipeline: pulls public aerospace data into a local SQLite warehouse.
+Aviation data platform: live public feeds → layered Parquet → DuckDB marts.
 Repo: https://github.com/moreno1a23-coder/aerospacefunnel
 
 ## Layout
 
-- `src/aerospacefunnel/sources/` — one module per source; each owns **both** `extract`
-  (network) and `transform` (payload → rows). Add new sources here.
-- `load.py` — `SCHEMA`, the `KEYS` natural-key map, and the idempotent `upsert`.
-- `pipeline.py` — wires any `Source` to the warehouse and writes `ingest_run` rows.
-- `cli.py` — argparse entry point (`aerospacefunnel <launches|flights|stats>`).
+- `sources/` — one module per upstream, each owning **both** `extract` (network) and
+  `transform` (payload → rows). Contract: `name`, `table`, `keys`, `extract`, `transform`.
+- `storage.py` — bronze (immutable gzip JSON) + silver/gold (atomic, deduped Parquet).
+- `pipeline.py` — `run()` for live pulls, `replay()` to rebuild from bronze offline.
+- `derive.py` — flight-leg segmentation from position fixes.
+- `marts.py` — analytics views; each declares `depends_on` so it is skipped, not broken.
+- `metadata.py` — SQLite: `pipeline_run`, `lineage`, `dq_result`. **Deliberately not DuckDB**
+  (tiny frequent transactional writes).
+- `throttle.py` — token bucket persisted in SQLite.
 
 ## Working here
 
 ```bash
-.venv/bin/python -m pytest      # 28 tests, fully offline
+.venv/bin/python -m pytest      # 115 tests, fully offline
 .venv/bin/ruff check .
 ```
 
-The venv is at `.venv/` (`pip install -e ".[dev]"`). Output goes to `data/`, which is
-gitignored along with `*.db`.
-
 ## Things that will bite you
 
-- **Launch Library 2 rate-limits anonymous callers to ~15 requests/hour.** Don't loop
-  `--max-pages` while iterating; use `tests/fixtures/` instead. A 429 is retried with
-  backoff, which means a careless test run stalls rather than fails fast.
-- **Tests must stay offline.** `tests/fixtures/` holds real captured responses. If you
-  change a transform, update the fixture from a live call once — don't add a network
-  call to the suite.
-- **OpenSky state vectors are positional arrays, not objects.** `FIELDS` in
-  `sources/flights.py` *is* the schema; the array has gained fields over time, so reads
-  go through `_at()` with a length guard.
-- **Adding a table means three edits**: `SCHEMA` and `KEYS` in `load.py`, plus registering
-  the source in `sources/__init__.py`. Missing `KEYS` raises `ValueError` on load.
+- **Launch Library 2 is 15 req/hr per IP with no free key.** Always use `--dev` (the
+  unlimited `lldev` mirror) while iterating. A 429 is retried with backoff, so a careless
+  loop stalls rather than failing fast.
+- **Tests must stay offline.** `tests/fixtures/` holds real captured responses. Change a
+  transform → refresh the fixture once from a live call; never add a network call to the suite.
+- **`alt_baro` is the string `"ground"`** for on-ground aircraft (116/716 in a live sample).
+  It is the only ground signal in the feed and `derive.py` depends on it.
+- **DuckDB `to_timestamp()` returns TIMESTAMPTZ**, which needs `pytz` to convert on fetch and
+  lets the session timezone shift date grouping. Every mart casts `::TIMESTAMP`. Keep doing that.
+- **PyArrow materialises `dt`/`hh` from the directory path** on read. `storage.write_partition`
+  strips them before merging; if you skip that they get baked into the file and collide.
+- **Never assign an airport to an unobserved endpoint.** `derive.py` returns NULL when the
+  aircraft was not seen on the ground within the radius. Guessing would corrupt every
+  utilisation and punctuality figure downstream. `complete` is the flag that matters.
+- **Adding a table means three edits**: register the source in `sources/__init__.py`, add it
+  to `TABLE_LAYERS`, and add expectations to `quality.SUITES`.
+
+## Honesty constraints baked into the design
+
+No free source publishes schedules, so `mart_punctuality_proxy` is a proxy against a rolling
+median — do not rename it to imply schedule adherence. Hub-radius polling means most legs are
+partial; that is represented, not smoothed over.

@@ -1,0 +1,10 @@
+[Unit]
+Description=aerospacefunnel: surveillance sweep (*:*:00)
+
+[Timer]
+OnCalendar=*:*:00
+Persistent=true
+RandomizedDelaySec=10
+
+[Install]
+WantedBy=timers.target

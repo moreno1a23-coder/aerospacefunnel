@@ -1,13 +1,56 @@
 # aerospacefunnel
 
-An ETL pipeline that funnels public aerospace data into a local SQLite warehouse.
+A commercial-grade aviation data platform built entirely on public feeds. It funnels live
+surveillance, weather, hazards, disruption and reference data into a layered Parquet
+warehouse queried with DuckDB.
 
-Two sources ship today, both free and keyless:
+```
+  ingest            bronze                silver / gold        marts
+  ──────            ──────                ─────────────        ─────
+  poller ──► immutable .json.gz ──► typed Parquet ──► dims + facts ──► DuckDB views
+             dt=/hh= partitions      atomic, deduped    SCD-ready       analytics SQL
+             (replayable)            (idempotent)
+```
 
-| Source | Upstream | What lands |
-|---|---|---|
-| `launches` | [Launch Library 2](https://ll.thespacedevs.com/2.2.0/swagger/) | Orbital/suborbital launch records — provider, vehicle, pad, orbit, status |
-| `flights` | [OpenSky Network](https://openskynetwork.github.io/opensky-api/rest.html) | A snapshot of live ADS-B state vectors inside a bounding box |
+## What it actually does
+
+Every figure below came from a real run, not an estimate:
+
+```
+$ aerospacefunnel poll
+KJFK  ok    736 aircraft via adsb.lol
+KLAX  ok    436 aircraft via adsb.lol
+KORD  ok    954 aircraft via adsb.lol
+
+$ aerospacefunnel query "SELECT airport, reason, sample_avg_delay FROM mart_network_disruption"
+BOS   low ceilings           1 hour and 46 minutes
+SFO   low ceilings           41 minutes
+```
+
+## Scope — read this before trusting anything
+
+This is a production-grade platform **over public data**. It is not a full airline data
+platform, and engineering cannot make it one.
+
+**It does:** live network surveillance, aerodrome/fleet reference, weather and en-route
+hazards, disruption and delay feeds, derived flight legs, fleet utilisation, route
+efficiency, emergency detection, launch-airspace conflict.
+
+**It cannot, at any price from public sources:** passenger bookings, crew rostering,
+maintenance records, fuel uplift, cargo manifests, revenue accounting. These are internal
+systems with no public API.
+
+**It cannot without paid feeds:** published schedules (OAG/Cirium). ADS-B yields *actuals
+only*, so there is no true scheduled-vs-actual on-time performance — which is why the mart
+is named `mart_punctuality_proxy` and compares each callsign against its own rolling median
+instead of a timetable. Community ADS-B also has genuine coverage gaps (no mid-ocean ground
+stations; satellite ADS-B is commercial).
+
+**Partial observation is explicit.** Hub-radius polling sees an aircraft only inside the
+bubble, so most legs are transits whose real origin was never observed. Those get NULL
+endpoints and `complete = false`, never a guessed nearest airport. In a 7-minute sample,
+1,691 legs were derived and exactly 1 was complete — the flags are load-bearing, not
+decorative.
 
 ## Install
 
@@ -16,108 +59,117 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-Requires Python 3.11+. The only runtime dependency is `requests`.
+Python 3.11+. Runtime dependencies: `requests`, `duckdb`, `pyarrow`. Config uses stdlib
+`tomllib`.
 
 ## Use
 
 ```bash
-# Pull the 100 most recent launches
-aerospacefunnel launches --limit 100
+aerospacefunnel ingest airports        # reference data first - everything joins to it
+aerospacefunnel poll                   # one surveillance sweep across all hubs
+aerospacefunnel ingest metar           # weather
+aerospacefunnel ingest disruption      # FAA ground delays and stops
+aerospacefunnel ingest sigmet          # en-route hazards
+aerospacefunnel legs                   # derive flight legs from accumulated fixes
+aerospacefunnel warehouse              # build DuckDB views and marts
+aerospacefunnel query "SELECT * FROM mart_traffic_density"
 
-# Walk several pages
-aerospacefunnel launches --limit 100 --max-pages 5
-
-# Snapshot every aircraft over the Alps (lat_min,lon_min,lat_max,lon_max)
-aerospacefunnel flights --bbox 45,5,47,8
-
-# See what's in the warehouse and how the last runs went
-aerospacefunnel stats
+aerospacefunnel check                  # data-quality gates
+aerospacefunnel stats                  # what is loaded, how runs went
+aerospacefunnel keys --probe           # credential status
+aerospacefunnel replay sigmet          # rebuild silver from bronze, no network
 ```
 
-Useful flags: `--db PATH` (default `data/aerospace.db`), `--dry-run` to
-extract and transform without writing, `--raw-dir DIR` to also archive the untouched
-API payloads, and `-v` for per-page logging.
+## Sources
 
-## How it works
+All verified live on 2026-07-29. **Nothing below requires a credential.**
 
+| Domain | Source | Notes |
+|---|---|---|
+| Surveillance | adsb.lol → airplanes.live → adsb.fi | keyless, automatic failover |
+| Weather | NOAA Aviation Weather Center (METAR/TAF) | keyless, ~0.2s |
+| Hazards | SIGMET / G-AIRMET | keyless, 135 active in one sample |
+| Disruption | FAA NAS status | keyless, live ground delay programmes |
+| Aerodromes | OurAirports | 47,975 airports loaded |
+| Launch windows | Launch Library 2 | 15 req/hr; `--dev` mirror is unlimited |
+| Orbital | CelesTrak GP | keyless |
+| Space weather | NOAA SWPC | keyless |
+
+Optional credentials only *improve* things — see `.env.example`. OpenSky OAuth2 lifts
+400 credits/day to 4,000 and 10s to 5s resolution. **Launch Library 2 has no free key**:
+15 req/hr per IP is the ceiling and keys are Patreon-only, which is why development uses
+the unlimited `lldev` mirror.
+
+## Design decisions worth knowing
+
+- **Bronze is immutable and replayable.** Payloads are archived before parsing, so a
+  transform bug is fixed by reprocessing archived bytes — never by re-fetching from a
+  rate-limited upstream. `aerospacefunnel replay <source>` does this with no network.
+- **Writes are atomic and idempotent.** A partition is one `data.parquet` written to a temp
+  file, fsynced, then `os.replace`d. Re-running a load merges and deduplicates on the
+  natural key rather than appending duplicates.
+- **Rate limiting survives process exit.** LL2's 15/hr is per IP, so an in-process limiter
+  cannot enforce it across cron invocations. The token bucket lives in SQLite and refuses
+  *before* the request instead of earning a 429.
+- **Upstream failure is data, not an exception.** A failed run records `status='error'` in
+  `pipeline_run` with the exception; the pipeline never raises into a scheduler.
+- **Quality gates block publication.** Range, uniqueness, null-rate and freshness checks run
+  between load and mart refresh. Publishing a confidently wrong number is worse than none.
+- **Antimeridian hazards are handled.** Pacific FIRs report longitudes past 180 (a live
+  sample carried 183.8). Naively wrapping and taking min/max would produce a box covering
+  nearly the globe, silently matching every flight; crossings are detected and flagged.
+- **`alt_baro: "ground"`** is a string sentinel, not a null — 116 of 716 aircraft in one
+  sample. It is the only on-ground signal the feed carries, and leg segmentation needs it.
+
+## Storage
+
+Measured, not estimated: zstd compresses a real ADS-B payload **8.2x** (497 B → 61 B/row),
+and columnar Parquet does better because `hex`/`type`/`squawk` dictionary-encode. Planning
+figure ~20 B/row.
+
+| Coverage | Raw tier | Steady state (all tiers) |
+|---|---|---|
+| Hub-focused @60s | ~20 MB/day | **< 5 GB** |
+| US-wide @10s | ~1 GB/day | ~32 GB |
+| Global @10s | ~2.6 GB/day | ~80 GB |
+
+Storage is not the constraint at hub scope — bandwidth and feed politeness are. adsb.lol,
+airplanes.live and adsb.fi are donated community infrastructure; poll them accordingly.
+
+## Configuration
+
+`config/platform.toml`. Adding a hub is a config edit, never a code change:
+
+```toml
+[surveillance]
+cadence_seconds = 60
+
+[[hubs]]
+icao = "KJFK"
+radius_nm = 250
 ```
-  extract          transform            load
-  ───────          ─────────            ────
-  paged HTTP  ──►  normalise rows  ──►  SQLite upsert
-  w/ retries       (fixture-tested)     (idempotent)
-                                            │
-                                            ▼
-                                        ingest_run
-                                        bookkeeping
-```
 
-Each source in `src/aerospacefunnel/sources/` owns both its `extract` (network) and its
-`transform` (payload → rows). Keeping the pair together means a payload shape is
-understood in exactly one file, and the transform stays testable against a saved
-fixture with no network involved. `pipeline.py` wires any source to the warehouse;
-`load.py` owns the schema.
+## Scheduling
 
-Three design points worth knowing:
-
-- **Loads are idempotent.** Every table has a natural key (`launch.id`;
-  `flight_state.(icao24, snapshot_time)`) and writes go through `INSERT … ON CONFLICT DO
-  UPDATE`. Re-running a pull refreshes rows in place, so an overlapping cron is harmless.
-- **Upstream failures are data, not exceptions.** A run that dies mid-pull rolls back its
-  partial writes and records `status='error'` with the exception in `ingest_run`. The CLI
-  exits non-zero, but the pipeline never raises into a scheduler.
-- **Schema drift is survivable.** Row keys are intersected with the real table columns
-  before they reach SQL, so a new upstream field is ignored rather than fatal — and can't
-  inject SQL. OpenSky's positional state vectors are read by index with a length guard,
-  since the array has grown over time.
-
-## Schema
-
-```
-launch(id PK, slug, name, status, status_abbrev, net, window_start, window_end,
-       provider, mission, mission_type, pad, location, orbit, launcher,
-       image_url, last_updated, ingested_at)
-
-flight_state(icao24, snapshot_time, PK(icao24, snapshot_time), callsign,
-             origin_country, time_position, last_contact, longitude, latitude,
-             baro_altitude, geo_altitude, on_ground, velocity, true_track,
-             vertical_rate, squawk, spi, position_source, sensor_count, ingested_at)
-
-ingest_run(id PK, source, started_at, finished_at, status, pages,
-           rows_read, rows_loaded, error)
-```
-
-Query it like any SQLite database:
-
-```sql
-SELECT provider, COUNT(*) FROM launch
-WHERE net >= '2025-01-01' GROUP BY 1 ORDER BY 2 DESC;
-```
-
-## Rate limits
-
-Launch Library 2 allows roughly **15 requests/hour** to anonymous callers; OpenSky
-throttles anonymous polling too. The shared session in `http.py` retries `429` and `5xx`
-with exponential backoff and honours `Retry-After`, but it can't manufacture quota —
-keep `--max-pages` modest and don't poll `flights` faster than about once a minute.
+systemd user timers in `systemd/` — see `systemd/README.md`. Remember
+`loginctl enable-linger $USER`, or the timers stop at logout.
 
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest      # 115 tests, fully offline
 .venv/bin/ruff check .
 ```
 
-The suite is offline. `tests/fixtures/` holds real captured responses from both APIs, so
-transforms are tested against the shapes the services actually return rather than
-invented ones.
+`tests/fixtures/` holds real captured responses from every upstream, so transforms are
+tested against the shapes these services actually return. The suite never makes a network
+call — including the failover and OAuth2 paths, which use stand-in sessions.
 
 ## Adding a source
 
-Implement the `Source` protocol in `sources/base.py` — a `name`, a `table`, an `extract`
-that yields raw payloads, and a `transform` that yields rows. Add the table to `SCHEMA`
-and its natural key to `KEYS` in `load.py`, register the class in `sources/__init__.py`,
-and give the CLI a subcommand. Save a real response into `tests/fixtures/` while you're
-there.
+Implement `name`, `table`, `keys`, `extract` and `transform`. Register it in
+`sources/__init__.py` and add the table to `TABLE_LAYERS`. Add expectations to
+`quality.SUITES`, and save a real response into `tests/fixtures/`.
 
 ## License
 

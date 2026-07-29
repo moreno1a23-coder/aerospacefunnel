@@ -13,3 +13,6 @@ data/
 *.db
 *.sqlite
 *.sqlite3
+
+# credentials - never commit
+.env

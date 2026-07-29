@@ -28,5 +28,11 @@ jobs:
         run: ruff check .
 
       - name: Test
-        # The suite runs against saved fixtures, so CI never calls the upstream APIs.
+        # The suite runs entirely against saved fixtures - CI never calls an upstream API,
+        # so a rate-limited or briefly-down provider can never turn the build red.
         run: pytest
+
+      - name: Prove the suite is offline
+        # Re-runs everything with sockets denied. A test that quietly starts calling a live
+        # API fails here instead of making the build depend on someone else's uptime.
+        run: pytest -p netblock

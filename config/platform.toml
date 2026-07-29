@@ -1,0 +1,40 @@
+# aerospacefunnel platform configuration.
+#
+# Adding a hub is a config edit, never a code change. Cadence is a value here so the
+# fidelity/bandwidth trade-off can be changed without touching the pipeline.
+
+[storage]
+root = "data"          # bronze/, silver/, gold/ live under here
+warehouse = "data/warehouse.duckdb"
+
+[surveillance]
+cadence_seconds = 60
+# Failover order. Every one of these was probed live and is keyless.
+primary = "adsb.lol"
+failover = ["airplanes.live", "adsb.fi"]
+
+[retention]
+raw_days = 30          # bronze payloads kept for replay
+rollup_days = 365      # downsampled positions
+# flight legs and marts are kept indefinitely - they are small
+
+[launch_library]
+# Production is 15 req/hr per IP with no free key. The dev mirror has no rate limit but
+# serves a stale, limited data set - correct for development, never for real pulls.
+base_url = "https://ll.thespacedevs.com/2.2.0"
+dev_url = "https://lldev.thespacedevs.com/2.2.0"
+
+[[hubs]]
+icao = "KJFK"
+name = "New York JFK"
+radius_nm = 250
+
+[[hubs]]
+icao = "KLAX"
+name = "Los Angeles"
+radius_nm = 250
+
+[[hubs]]
+icao = "KORD"
+name = "Chicago O'Hare"
+radius_nm = 250
