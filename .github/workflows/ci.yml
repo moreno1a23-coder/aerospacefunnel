@@ -35,4 +35,6 @@ jobs:
       - name: Prove the suite is offline
         # Re-runs everything with sockets denied. A test that quietly starts calling a live
         # API fails here instead of making the build depend on someone else's uptime.
-        run: pytest -p netblock
+        # `python -m` is required: it puts the repo root on sys.path so the root-level
+        # netblock plugin is importable. Bare `pytest` does not.
+        run: python -m pytest -p netblock
